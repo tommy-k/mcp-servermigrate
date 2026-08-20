@@ -34,16 +34,16 @@ Built specifically for **domain-joined, policy-managed environments** (SSSD, Act
 
 ```mermaid
 flowchart TD
-    subgraph ModeA["Mode A: Workstation Orchestrator (Windows / macOS / Linux)"]
+    subgraph ModeA["Mode A: Workstation Orchestrator"]
         Workstation["Workstation / AI Agent<br/>(Cursor, Antigravity, Claude)"]
-        Workstation -->|SSH (Read-Only)| SrvX_A["Source Server X"]
-        Workstation -->|SSH (Staged Execution)| SrvY_A["Target Server Y"]
+        Workstation -->|"SSH (Read-Only)"| SrvX_A["Source Server X"]
+        Workstation -->|"SSH (Staged Execution)"| SrvY_A["Target Server Y"]
     end
 
-    subgraph ModeB["Mode B: Source-Host Execution (Direct on Server X)"]
+    subgraph ModeB["Mode B: Source-Host Execution"]
         RemoteIDE["Remote Session / IDE<br/>(Cursor Remote-SSH on Server X)"]
-        RemoteIDE -->|Local Audit / Inspection| SrvX_B["Source Server X (Localhost)"]
-        RemoteIDE -->|SSH / rsync| SrvY_B["Target Server Y (Remote)"]
+        RemoteIDE -->|"Local Audit"| SrvX_B["Source Server X (Localhost)"]
+        RemoteIDE -->|"SSH and rsync"| SrvY_B["Target Server Y (Remote)"]
     end
 ```
 
