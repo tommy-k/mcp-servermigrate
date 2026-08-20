@@ -1,13 +1,13 @@
 # 🚀 MCP ServerMigrate Agent
 
-[![Python 3.14+](https://img.shields.io/badge/Python-3.14%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform: RHEL/Fedora](https://img.shields.io/badge/Platform-RHEL%20%7C%20Fedora-CC0000.svg)](https://www.redhat.com/en/technologies/linux-platforms/enterprise-linux)
 [![Protocol: MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-8A2BE2.svg)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent and CLI designed for migrating and modernizing **RHEL & Fedora** servers.
+An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent designed for migrating, modernizing, and auditing **RHEL & Fedora** servers.
 
-Built specifically for **domain-joined, policy-managed environments** (SSSD, Active Directory, Red Hat Satellite, GPO baselines), `mcp-servermigrate` bridges the gap between central compliance and application-level customizations.
+Built specifically for **domain-joined, policy-managed environments** (SSSD, Active Directory, Red Hat Satellite, GPO baselines), `mcp-servermigrate` bridges the gap between central compliance baselines and application-level customizations.
 
 ---
 
@@ -30,139 +30,143 @@ Built specifically for **domain-joined, policy-managed environments** (SSSD, Act
 
 ---
 
-## 🏗️ Architecture & Flow
+## 🏗️ Architecture & Deployment Topologies
 
 ```mermaid
 flowchart TD
-    subgraph Controller["Local Controller / Workstation (WSL / Linux)"]
-        CLI["mcp-servermigrate CLI / FastMCP Server"]
-        Vault["Ephemeral In-Memory Sudo Vault"]
+    subgraph ModeA["Mode A: Workstation Orchestrator (Windows / macOS / Linux)"]
+        Workstation["Workstation / AI Agent<br/>(Cursor, Antigravity, Claude)"]
+        Workstation -->|SSH (Read-Only)| SrvX_A["Source Server X"]
+        Workstation -->|SSH (Staged Execution)| SrvY_A["Target Server Y"]
     end
 
-    subgraph Source["Source: Server X (RHEL / Fedora)"]
-        Disc["Phase 1: Read-Only Audit<br/>(RPMs, /opt, Crons, ACLs)"]
+    subgraph ModeB["Mode B: Source-Host Execution (Direct on Server X)"]
+        RemoteIDE["Remote Session / IDE<br/>(Cursor Remote-SSH on Server X)"]
+        RemoteIDE -->|Local Audit / Inspection| SrvX_B["Source Server X (Localhost)"]
+        RemoteIDE -->|SSH / rsync| SrvY_B["Target Server Y (Remote)"]
     end
-
-    subgraph Target["Target: Server Y (RHEL / Fedora)"]
-        RBAC["Phase 2: Decoupled RBAC<br/>(PAM + POSIX ACLs)"]
-        Sync["Phase 3: Sync & Config<br/>(/opt/tools, profile.d)"]
-        QA["Phase 4: Verification<br/>(SELinux AVC, Ports, Services)"]
-    end
-
-    CLI -->|SSH Read-Only| Disc
-    Disc -->|Generate Plan| CLI
-    Vault -.->|Pipes sudo -S securely| Sync
-    CLI -->|SSH Staged Execution| RBAC
-    CLI -->|rsync -avAX| Sync
-    CLI -->|SSH Health Checks| QA
 ```
-
----
-
-## 📍 Where to Run It
-
-| Location | Role | Requirements |
-| :--- | :--- | :--- |
-| **Your Workstation / Controller** *(e.g., WSL, Jump Box)* | **Runs `mcp-servermigrate`** | Python 3.11+, Git, SSH access to servers |
-| **Server X (Source)** | **Zero Footprint** (Inspected remotely) | Standard SSH & `sudo` access |
-| **Server Y (Target)** | **Zero Footprint** (Configured remotely) | Standard SSH & `sudo` access |
-
-> 💡 **Zero Remote Dependencies:** Server X and Server Y do **not** need Python virtual environments or `mcp-servermigrate` installed. Everything is orchestrated remotely over secure SSH.
 
 ---
 
 ## 📥 Installation
 
-Run these steps on your **workstation / migration controller** (e.g., Fedora 44 WSL):
+Clone the repository and set up a virtual environment in your preferred workspace directory:
 
-### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-org/mcp-servermigrate.git
+# 1. Clone the repository
+git clone https://github.com/<your-org>/mcp-servermigrate.git
 cd mcp-servermigrate
-```
 
-### 2. Set Up Virtual Environment (Python 3.14)
-```bash
-# Create isolated environment
-python3.14 -m venv .venv
-
-# Activate environment
+# 2. Initialize and activate Python virtual environment (Python 3.11+)
+python3 -m venv .venv
 source .venv/bin/activate
 
-# Upgrade pip and install package in editable mode
+# 3. Install in editable mode
 pip install --upgrade pip
 pip install -e .
 ```
 
-### 3. Optional: Global CLI Symlink
-To execute `mcp-servermigrate` from anywhere without typing `source .venv/bin/activate`:
-```bash
-ln -sf $(pwd)/.venv/bin/mcp-servermigrate ~/.local/bin/mcp-servermigrate
-```
-
 ---
 
-## 🚀 How to Run It
+## 🚀 How to Run (MCP Agent Integration)
 
-### Mode A: Standalone CLI
+`mcp-servermigrate` is designed primarily as an **MCP (Model Context Protocol) Server**, providing your AI agent (Cursor, Antigravity, Claude Desktop, etc.) with direct tools to audit and migrate servers.
 
-#### 1. Audit a Host (Discovery Phase)
-Inspects a single server and outputs structured JSON telemetry:
-```bash
-mcp-servermigrate audit --host server-x.domain.corp
-```
+Choose the deployment mode that fits your environment:
 
-#### 2. Run Full Server Migration (Interactive Mode)
-Prompts for approval before running elevated commands on the target:
-```bash
-mcp-servermigrate migrate \
-  --source server-x.domain.corp \
-  --target server-y.domain.corp \
-  --user root
-```
+### Mode A: Local Execution on Your Workstation (Windows / macOS / Linux / WSL)
 
-#### 3. Run Automated Migration (Unattended Mode)
-Bypasses interactive prompts for automated CI/CD pipelines while maintaining full audit logging:
-```bash
-mcp-servermigrate migrate \
-  --source server-x.domain.corp \
-  --target server-y.domain.corp \
-  --auto-approve-sudo
-```
+The MCP server runs on your local machine or jump host. The AI agent connects to both Source and Target servers remotely over SSH, leaving **zero software footprint** on either server.
 
----
+#### 1. Native Linux / macOS Workstation Configuration
+Add this entry to your client's MCP configuration file (e.g., `mcp_config.json` or `.cursor/mcp.json`):
 
-### Mode B: FastMCP Server (AI Agent Integration)
-
-Integrate `mcp-servermigrate` directly into your AI assistant or agentic IDE (e.g., Antigravity, Claude Desktop):
-
-#### Launch the MCP Server:
-```bash
-python -m mcp_servermigrate.server
-```
-
-#### Example MCP Client Configuration (`mcp_config.json`):
 ```json
 {
   "mcpServers": {
     "server-migrate": {
-      "command": "/home/tom/github-repos/mcp-servermigrate/.venv/bin/python",
+      "command": "<path-to-repo>/.venv/bin/python",
       "args": ["-m", "mcp_servermigrate.server"]
     }
   }
 }
 ```
 
-#### Exposed MCP Tools:
-* `audit_host(host, user)`: Performs deep read-only inspection of a host.
-* `create_migration_plan(source_host, target_host, user)`: Computes gap analysis and returns an executable migration runbook.
-* `execute_migration(source_host, target_host, user)`: Executes staged migration with approval gates and runs post-flight verification.
+#### 2. Windows Host (Bridging into WSL) Configuration
+If your AI IDE runs on Windows and the project is hosted inside WSL:
+
+```json
+{
+  "mcpServers": {
+    "server-migrate": {
+      "command": "wsl.exe",
+      "args": [
+        "-d", "<your-wsl-distro-name>",
+        "bash", "-c",
+        "cd <path-to-repo> && source .venv/bin/activate && python -m mcp_servermigrate.server"
+      ]
+    }
+  }
+}
+```
+
+---
+
+### Mode B: Local Execution on the Server (Source Server X)
+
+The MCP server runs directly on the source server (Server X)—ideal if you are connecting via **Cursor Remote-SSH** or running an on-box agent session.
+
+#### 1. Cursor Remote-SSH Workspace
+When Cursor is connected directly to Server X, add this to the workspace's `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "server-migrate": {
+      "command": "<path-to-repo-on-server>/.venv/bin/python",
+      "args": ["-m", "mcp_servermigrate.server"]
+    }
+  }
+}
+```
+
+#### 2. Remote SSH Pipe (Local Agent $\rightarrow$ Remote Server)
+If your local AI agent wants to execute the MCP server remotely on Server X without opening a full remote IDE session:
+
+```json
+{
+  "mcpServers": {
+    "server-migrate-remote": {
+      "command": "ssh",
+      "args": [
+        "-T",
+        "<user>@<source-server-host>",
+        "<path-to-repo-on-server>/.venv/bin/python -m mcp_servermigrate.server"
+      ]
+    }
+  }
+}
+```
+
+---
+
+## 🛠️ Exposed MCP Tools
+
+Once connected, your AI assistant will have access to the following tools:
+
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `audit_host` | `host`, `user` | Performs a deep, read-only audit of a server (RPM packages, unmanaged binaries in `/opt`, crons, systemd units, and ACLs). |
+| `create_migration_plan` | `source_host`, `target_host`, `user` | Performs gap analysis between source and target, mapping decoupled RBAC rules and generating an actionable migration plan. |
+| `execute_migration` | `source_host`, `target_host`, `user` | Executes the migration plan with interactive sudo confirmation gates and runs post-flight verification. |
 
 ---
 
 ## 🧪 Testing
 
-Run the automated test suite:
+Run the automated test suite on your host:
+
 ```bash
 source .venv/bin/activate
 pytest tests/
