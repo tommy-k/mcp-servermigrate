@@ -9,7 +9,7 @@ mcp = FastMCP("Server-Migrate-Agent")
 
 @mcp.tool()
 def audit_host(host: str, user: str = "root") -> str:
-    """Inspects a RHEL/Fedora host, checks for on-server lineage (/etc/mcp-migration), and returns structured JSON telemetry."""
+    """Inspects an Enterprise Linux host (RHEL, Rocky, Alma, Fedora, Oracle Linux), checks for on-server lineage (/etc/mcp-migration), and returns structured JSON telemetry."""
     conn = SSHConnection(host=host, user=user)
     engine = DiscoveryEngine(conn)
     state = engine.discover_state()

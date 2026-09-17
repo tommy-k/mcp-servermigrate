@@ -7,14 +7,14 @@ def test_genesis_planner_resolves_upstream_tarball():
     # Server 1: Genesis host (no prior manifest)
     src = ServerState(
         hostname="server-01.corp",
-        os_release="Fedora 44",
+        os_release="Red Hat Enterprise Linux 9.4 (Plow)",
         is_genesis=True,
         unmanaged_binaries=[
             BinaryItem(path="/usr/local/bin/terraform", is_rpm_owned=False),
             BinaryItem(path="/usr/local/bin/gh", is_rpm_owned=False)
         ]
     )
-    tgt = ServerState(hostname="server-02.corp", os_release="Fedora 44")
+    tgt = ServerState(hostname="server-02.corp", os_release="Rocky Linux 9.4 (Blue Onyx)")
     planner = MigrationPlanner(src, tgt)
     plan = planner.generate_plan()
 
@@ -46,14 +46,14 @@ def test_generational_planner_preloads_inherited_recipes():
     )
     src = ServerState(
         hostname="server-02.corp",
-        os_release="Fedora 44",
+        os_release="AlmaLinux 9.4 (Seafoam Ocelot)",
         is_genesis=False,
         migration_manifest=manifest,
         unmanaged_binaries=[
             BinaryItem(path="/opt/tools/bin/terraform", is_rpm_owned=False)
         ]
     )
-    tgt = ServerState(hostname="server-03.corp", os_release="Fedora 44")
+    tgt = ServerState(hostname="server-03.corp", os_release="Enterprise Linux 9")
     planner = MigrationPlanner(src, tgt)
     plan = planner.generate_plan()
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mcp-servermigrate"
 version = "0.1.0"
-description = "MCP Agent and Server for RHEL/Fedora System Migration"
+description = "MCP Agent & Server for Enterprise Linux Migration (RHEL, Rocky, AlmaLinux, Fedora)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,11 +1,11 @@
 # 🚀 MCP ServerMigrate Agent
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Platform: RHEL/Fedora](https://img.shields.io/badge/Platform-RHEL%20%7C%20Fedora-CC0000.svg)](https://www.redhat.com/en/technologies/linux-platforms/enterprise-linux)
+[![Platform: Enterprise Linux](https://img.shields.io/badge/Platform-RHEL%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora-CC0000.svg)](https://www.redhat.com/en/technologies/linux-platforms/enterprise-linux)
 [![Protocol: MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-8A2BE2.svg)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent designed for migrating, modernizing, and auditing **RHEL & Fedora** servers.
+An intelligent, enterprise-grade **Model Context Protocol (MCP)** agent designed for migrating, modernizing, and auditing **Enterprise Linux** servers (Red Hat Enterprise Linux, Rocky Linux, AlmaLinux, Oracle Linux, CentOS Stream, and Fedora).
 
 Built specifically for **domain-joined, policy-managed environments** (SSSD, Active Directory, Red Hat Satellite, GPO baselines), `mcp-servermigrate` bridges the gap between central compliance baselines and application-level customizations.
 

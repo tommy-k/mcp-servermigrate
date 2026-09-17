@@ -8,7 +8,7 @@ class DiscoveryEngine:
 
     def discover_state(self) -> ServerState:
         hostname = self.ssh.run_cmd("hostname -f").strip() or self.ssh.host
-        os_release = self.ssh.run_cmd("cat /etc/redhat-release 2>/dev/null").strip() or "Unknown Linux"
+        os_release = self.ssh.run_cmd("source /etc/os-release 2>/dev/null && echo \"$PRETTY_NAME\" || cat /etc/redhat-release 2>/dev/null || uname -s").strip() or "Enterprise Linux"
 
         # 1. Check for on-server migration lineage (Genesis vs Generational)
         manifest = LineageManager.read_manifest_from_host(self.ssh)

@@ -7,7 +7,7 @@ from mcp_servermigrate.modules.planner import MigrationPlanner
 from mcp_servermigrate.modules.executor import MigrationExecutor
 from mcp_servermigrate.modules.verifier import PostFlightVerifier
 
-app = typer.Typer(help="CLI for RHEL/Fedora Server Migration Agent")
+app = typer.Typer(help="CLI for Enterprise Linux Server Migration Agent (RHEL, Rocky, Alma, Fedora)")
 console = Console()
 
 @app.command()
