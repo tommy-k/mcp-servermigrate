@@ -53,3 +53,19 @@ class SSHConnection:
         if exit_status != 0 and err.strip():
             raise RuntimeError(f"Sudo command failed (code {exit_status}): {err}")
         return out
+
+    def run_privileged(self, command: str, justification: str = "Administrative operation") -> str:
+        """Runs command as root directly if connected as root, otherwise escalates via sudo."""
+        if self.user == "root":
+            return self.run_cmd(command)
+        return self.run_sudo_cmd(command, justification)
+
+    def run_with_sudo_fallback(self, command: str, justification: str = "Operation requiring elevated privileges") -> str:
+        """Attempts normal execution first; if permission denied occurs, automatically escalates to sudo."""
+        if self.user == "root":
+            return self.run_cmd(command)
+        
+        out = self.run_cmd(command)
+        if "permission denied" in out.lower() or "operation not permitted" in out.lower():
+            return self.run_sudo_cmd(command, justification)
+        return out

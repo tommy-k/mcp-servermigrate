@@ -19,10 +19,14 @@ Built specifically for **domain-joined, policy-managed environments** (SSSD, Act
 * 📦 **Phase 2: Universal Dynamic Release Resolver**
   * Proactively resolves **latest stable upstream releases** for tools not in Red Hat repositories (HashiCorp, GitHub Releases, vendor endpoints).
   * Automatically handles universal archives (`.tar.gz`, `.zip`, `.tgz`, raw binaries) and stages them into `/opt/tools/bin/`.
-* 🛡️ **Phase 3: Decoupled RBAC & Shell Layering**
-  * Bridges Active Directory identities to local semantic role groups (`tool_users`, `app_operators`) via PAM (`/etc/security/group.conf`).
-  * Applies **POSIX ACLs with default inheritance (`-d`)** so all newly deployed tools inherit execution permissions for domain users.
+* 👥 **Phase 3: Application Group Capture & Granular RBAC**
+  * Audits and captures custom application groups from the origin server (`terraform_users`, `git_users`, `db_operators`).
+  * Automatically re-creates these groups on target servers and binds granular POSIX ACLs per application (`setfacl -m g:<group>:rx <binary>`).
+  * Deploys decoupled PAM mappings (`/etc/security/group.conf`) bridging Active Directory accounts to local role groups.
   * Injects global tool paths non-destructively via `/etc/profile.d/corp-standards.sh` while preserving user customizability in `~/.bashrc`.
+* 🤝 **Onboarding Handover Contract**
+  * Generates an **Application Groups Matrix** inside `/etc/mcp-migration/manifest.json` and `SKILL.md`.
+  * Future User Onboarding scripts or agents can inspect this contract to know precisely which groups users must join to access specific CLI applications.
 * 🧠 **Phase 4: On-Server Migration Skill & Lineage Recording**
   * Plants a persistent machine-readable manifest (`/etc/mcp-migration/manifest.json`) and an operational skill (`/etc/mcp-migration/SKILL.md`) on target hosts.
   * **Generational Inheritance:** Future migrations from Server 2 to Server 3 automatically preload verified recipes, permissions, and URLs learned during previous runs.

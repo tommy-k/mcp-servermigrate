@@ -13,8 +13,16 @@ class BinaryItem(BaseModel):
     path: str
     is_rpm_owned: bool
     package_name: Optional[str] = None
+    group_owner: str = "root"
+    acl_groups: List[str] = Field(default_factory=list)
     permissions: str = ""
     selinux_context: str = ""
+
+class GroupItem(BaseModel):
+    name: str
+    gid: Optional[int] = None
+    members: List[str] = Field(default_factory=list)
+    associated_apps: List[str] = Field(default_factory=list)
 
 class CronEntry(BaseModel):
     user: str
@@ -32,7 +40,7 @@ class ToolRecipe(BaseModel):
     download_url: Optional[str] = None
     target_path: str = "/opt/tools/bin"
     group: str = "tool_users"
-    archive_format: str = "tar.gz"  # tar.gz, zip, raw_binary
+    archive_format: str = "tar.gz"
     binary_name: Optional[str] = None
 
 class ServerMigrationManifest(BaseModel):
@@ -40,6 +48,7 @@ class ServerMigrationManifest(BaseModel):
     parent_host: str
     migration_timestamp: str
     tools: Dict[str, ToolRecipe] = Field(default_factory=dict)
+    application_groups: Dict[str, List[str]] = Field(default_factory=dict)
     local_group: str = "tool_users"
     ad_group: str = "Domain Users"
     acl_path: str = "/opt/tools"
@@ -61,6 +70,7 @@ class ServerState(BaseModel):
     os_release: str
     is_genesis: bool = True
     migration_manifest: Optional[ServerMigrationManifest] = None
+    custom_groups: List[GroupItem] = Field(default_factory=list)
     baseline_rpms: List[str] = Field(default_factory=list)
     third_party_rpms: List[str] = Field(default_factory=list)
     unmanaged_binaries: List[BinaryItem] = Field(default_factory=list)
@@ -81,6 +91,7 @@ class MigrationPlan(BaseModel):
     generation: int = 1
     is_genesis_migration: bool = True
     preloaded_recipes_used: List[str] = Field(default_factory=list)
+    groups_to_create: List[GroupItem] = Field(default_factory=list)
     apps_to_install: List[AppMigrationItem] = Field(default_factory=list)
     flat_binaries_to_sync: List[str] = Field(default_factory=list)
     root_crons_to_apply: List[CronEntry] = Field(default_factory=list)
