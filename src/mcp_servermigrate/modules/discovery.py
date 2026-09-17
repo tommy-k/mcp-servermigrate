@@ -1,5 +1,6 @@
 from mcp_servermigrate.core.models import ServerState, BinaryItem, CronEntry, ServiceItem
 from mcp_servermigrate.core.ssh_client import SSHConnection
+from mcp_servermigrate.modules.lineage import LineageManager
 
 class DiscoveryEngine:
     def __init__(self, ssh: SSHConnection):
@@ -9,6 +10,11 @@ class DiscoveryEngine:
         hostname = self.ssh.run_cmd("hostname -f").strip() or self.ssh.host
         os_release = self.ssh.run_cmd("cat /etc/redhat-release 2>/dev/null").strip() or "Unknown Linux"
 
+        # 1. Check for on-server migration lineage (Genesis vs Generational)
+        manifest = LineageManager.read_manifest_from_host(self.ssh)
+        is_genesis = manifest is None
+
+        # 2. Discover unmanaged binaries in /opt and /usr/local/bin
         binaries: list[BinaryItem] = []
         raw_paths = self.ssh.run_cmd("find /usr/local/bin /opt -maxdepth 3 -type f -executable 2>/dev/null").splitlines()
         for b_path in raw_paths:
@@ -27,6 +33,7 @@ class DiscoveryEngine:
                 selinux_context=ls_info[3] if len(ls_info) > 3 else "unknown"
             ))
 
+        # 3. Discover custom root crons
         root_crons: list[CronEntry] = []
         try:
             raw_crons = self.ssh.run_sudo_cmd("crontab -l -u root 2>/dev/null", "Audit root crontab").splitlines()
@@ -37,6 +44,7 @@ class DiscoveryEngine:
         except Exception:
             pass
 
+        # 4. Discover running services
         services: list[ServiceItem] = []
         raw_services = self.ssh.run_cmd("systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null").splitlines()
         for s in raw_services:
@@ -51,6 +59,8 @@ class DiscoveryEngine:
         return ServerState(
             hostname=hostname,
             os_release=os_release,
+            is_genesis=is_genesis,
+            migration_manifest=manifest,
             unmanaged_binaries=binaries,
             root_crons=root_crons,
             running_services=services,

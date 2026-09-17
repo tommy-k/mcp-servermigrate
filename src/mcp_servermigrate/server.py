@@ -9,7 +9,7 @@ mcp = FastMCP("Server-Migrate-Agent")
 
 @mcp.tool()
 def audit_host(host: str, user: str = "root") -> str:
-    """Inspects a RHEL/Fedora host and returns structured JSON telemetry."""
+    """Inspects a RHEL/Fedora host, checks for on-server lineage (/etc/mcp-migration), and returns structured JSON telemetry."""
     conn = SSHConnection(host=host, user=user)
     engine = DiscoveryEngine(conn)
     state = engine.discover_state()
@@ -18,30 +18,30 @@ def audit_host(host: str, user: str = "root") -> str:
 
 @mcp.tool()
 def create_migration_plan(source_host: str, target_host: str, user: str = "root") -> str:
-    """Performs gap analysis between Source and Target servers and generates a Migration Plan."""
+    """Performs gap analysis, preloads verified recipes from source lineage if present, resolves upstream releases, and generates a plan."""
     src_conn = SSHConnection(host=source_host, user=user)
     tgt_conn = SSHConnection(host=target_host, user=user)
     
     src_state = DiscoveryEngine(src_conn).discover_state()
     tgt_state = DiscoveryEngine(tgt_conn).discover_state()
     
+    planner = MigrationPlanner(src_state, tgt_state, src_conn, tgt_conn)
+    plan = planner.generate_plan()
+    
     src_conn.close()
     tgt_conn.close()
-    
-    planner = MigrationPlanner(src_state, tgt_state)
-    plan = planner.generate_plan()
     return plan.model_dump_json(indent=2)
 
 @mcp.tool()
 def execute_migration(source_host: str, target_host: str, user: str = "root") -> str:
-    """Executes the migration plan against the target server with safety confirmation gates."""
+    """Executes staged migration, downloads unmanaged CLI tools, configures RBAC, and plants the on-server SKILL.md lineage."""
     src_conn = SSHConnection(host=source_host, user=user)
     tgt_conn = SSHConnection(host=target_host, user=user)
     
     src_state = DiscoveryEngine(src_conn).discover_state()
     tgt_state = DiscoveryEngine(tgt_conn).discover_state()
     
-    plan = MigrationPlanner(src_state, tgt_state).generate_plan()
+    plan = MigrationPlanner(src_state, tgt_state, src_conn, tgt_conn).generate_plan()
     executor = MigrationExecutor(plan, src_conn, tgt_conn)
     executor.execute_plan()
     
@@ -50,4 +50,4 @@ def execute_migration(source_host: str, target_host: str, user: str = "root") ->
     
     src_conn.close()
     tgt_conn.close()
-    return f"Migration completed! Verification results: {results}"
+    return f"Migration completed! Generation {plan.generation} planted. Verification results: {results}"

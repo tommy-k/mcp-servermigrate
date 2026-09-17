@@ -13,20 +13,25 @@ Built specifically for **domain-joined, policy-managed environments** (SSSD, Act
 
 ## 🌟 Key Features
 
-* 🔍 **Phase 1: Deep Discovery & Gap Analysis**
-  * Differentiates OS/Satellite-managed RPMs from unmanaged flat binaries and standalone tools (`gh`, `rclone`, custom binaries in `/opt` and `/usr/local/bin`).
-  * Discovers running systemd services, active listening sockets (`ss`), and custom root crontabs without picking up baseline noise.
-* 🛡️ **Phase 2: Decoupled RBAC & Shell Layering**
+* 🔍 **Phase 1: Deep Discovery & Lineage Detection**
+  * Differentiates OS/Satellite-managed RPMs from unmanaged binaries (`terraform`, `gh`, `rclone`, `kubectl`, custom binaries in `/opt` and `/usr/local/bin`).
+  * Automatically detects **Genesis vs. Generational Hosts** by inspecting on-server migration records (`/etc/mcp-migration/manifest.json`).
+* 📦 **Phase 2: Universal Dynamic Release Resolver**
+  * Proactively resolves **latest stable upstream releases** for tools not in Red Hat repositories (HashiCorp, GitHub Releases, vendor endpoints).
+  * Automatically handles universal archives (`.tar.gz`, `.zip`, `.tgz`, raw binaries) and stages them into `/opt/tools/bin/`.
+* 🛡️ **Phase 3: Decoupled RBAC & Shell Layering**
   * Bridges Active Directory identities to local semantic role groups (`tool_users`, `app_operators`) via PAM (`/etc/security/group.conf`).
-  * Applies **POSIX ACLs with default inheritance (`-d`)** so new binaries automatically inherit least-privilege permissions.
-  * Deploys system-wide non-destructive shell standards in `/etc/profile.d/` while preserving full user customization in `~/.bashrc`.
-* 🔐 **Phase 3: Safe Staged Execution with Ephemeral Credentials**
-  * Rotating sudo passwords live strictly in **volatile memory**—never leaked into LLM contexts, logs, or disk.
-  * Interactive human-in-the-loop approval gates before any elevated mutation (with optional `--auto-approve-sudo` bypass).
-  * True enterprise sync preserving extended attributes and ACLs (`rsync -avAX`).
-* 🩺 **Phase 4: Post-Flight Health Verification**
-  * Scans SELinux audit logs (`audit.log`) for `AVC` denials (`ausearch -m avc`).
-  * Verifies systemd unit statuses, active listening ports, and filesystem ACL bindings.
+  * Applies **POSIX ACLs with default inheritance (`-d`)** so all newly deployed tools inherit execution permissions for domain users.
+  * Injects global tool paths non-destructively via `/etc/profile.d/corp-standards.sh` while preserving user customizability in `~/.bashrc`.
+* 🧠 **Phase 4: On-Server Migration Skill & Lineage Recording**
+  * Plants a persistent machine-readable manifest (`/etc/mcp-migration/manifest.json`) and an operational skill (`/etc/mcp-migration/SKILL.md`) on target hosts.
+  * **Generational Inheritance:** Future migrations from Server 2 to Server 3 automatically preload verified recipes, permissions, and URLs learned during previous runs.
+* 🔐 **Safe Staged Execution with Ephemeral Credentials**
+  * Rotating sudo passwords stay in volatile RAM—never leaked into LLM prompts, disk, or logs.
+  * Interactive human-in-the-loop approval gates before elevated mutations (with optional `--auto-approve-sudo` bypass).
+* 🩺 **Post-Flight Health Verification**
+  * Audits SELinux denial logs (`ausearch -m avc`) and ensures `bin_t` context is enforced.
+  * Verifies listening sockets (`ss -tulpn`) and systemd service health.
 
 ---
 
@@ -44,6 +49,23 @@ flowchart TD
         RemoteIDE["Remote Session / IDE<br/>(Cursor Remote-SSH on Server X)"]
         RemoteIDE -->|"Local Audit"| SrvX_B["Source Server X (Localhost)"]
         RemoteIDE -->|"SSH and rsync"| SrvY_B["Target Server Y (Remote)"]
+    end
+```
+
+---
+
+## 🧬 Generational Lineage Workflow
+
+```mermaid
+flowchart LR
+    subgraph Gen0["Genesis Run (Server 1 -> Server 2)"]
+        S1["Server 1 (Genesis)<br/>No prior history"] --> Plan1["Deep Research & Discovery<br/>Resolves Upstream Tarballs"]
+        Plan1 --> S2["Server 2 (Generation 1)<br/>Plants /etc/mcp-migration/"]
+    end
+
+    subgraph Gen1["Generational Run (Server 2 -> Server 3)"]
+        S2 -->|Preloads Verified Recipes| Plan2["Smart Plan<br/>Zero Redundant Prompts"]
+        Plan2 --> S3["Server 3 (Generation 2)<br/>Lineage Updated"]
     end
 ```
 
@@ -157,9 +179,9 @@ Once connected, your AI assistant will have access to the following tools:
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `audit_host` | `host`, `user` | Performs a deep, read-only audit of a server (RPM packages, unmanaged binaries in `/opt`, crons, systemd units, and ACLs). |
-| `create_migration_plan` | `source_host`, `target_host`, `user` | Performs gap analysis between source and target, mapping decoupled RBAC rules and generating an actionable migration plan. |
-| `execute_migration` | `source_host`, `target_host`, `user` | Executes the migration plan with interactive sudo confirmation gates and runs post-flight verification. |
+| `audit_host` | `host`, `user` | Performs a deep audit of a server, checks for `/etc/mcp-migration/manifest.json`, and returns structured JSON telemetry. |
+| `create_migration_plan` | `source_host`, `target_host`, `user` | Performs gap analysis, preloads verified recipes from prior lineage if present, resolves upstream releases, and generates an actionable plan. |
+| `execute_migration` | `source_host`, `target_host`, `user` | Executes the migration, downloads tarball CLI tools, deploys RBAC and profile baselines, and plants the on-server `SKILL.md` lineage. |
 
 ---
 
@@ -169,7 +191,7 @@ Run the automated test suite on your host:
 
 ```bash
 source .venv/bin/activate
-pytest tests/
+pytest tests/ -v
 ```
 
 ---
