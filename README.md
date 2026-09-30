@@ -90,7 +90,7 @@ source .venv/bin/activate
 
 # 3. Install in editable mode
 pip install --upgrade pip
-pip install -e .
+pip install -e ".[test]"
 ```
 
 ---
