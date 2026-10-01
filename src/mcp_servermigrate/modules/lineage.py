@@ -6,16 +6,23 @@ from mcp_servermigrate.core.ssh_client import SSHConnection
 
 MANIFEST_PATH = "/etc/mcp-migration/manifest.json"
 SKILL_PATH = "/etc/mcp-migration/SKILL.md"
+LINEAGE_GROUP = "mcp-migrate"
 
 class LineageManager:
     @staticmethod
     def read_manifest_from_host(ssh: SSHConnection) -> Optional[ServerMigrationManifest]:
-        """Reads existing migration lineage from /etc/mcp-migration/manifest.json if present."""
+        """
+        Reads existing migration lineage from /etc/mcp-migration/manifest.json if present.
+        BUG-18: Uses privileged check/read because /etc/mcp-migration may be mode 0750 or 2750.
+        """
         try:
-            check = ssh.run_cmd(f"test -f {MANIFEST_PATH} && echo 'EXISTS' || echo 'MISSING'").strip()
+            check = ssh.run_privileged(
+                f"test -f {MANIFEST_PATH} && echo 'EXISTS' || echo 'MISSING'",
+                "Check for migration manifest"
+            ).strip()
             if "EXISTS" not in check:
                 return None
-            raw_json = ssh.run_privileged(f"cat {MANIFEST_PATH} 2>/dev/null", "Read migration manifest").strip()
+            raw_json = ssh.run_privileged(f"cat '{MANIFEST_PATH}' 2>/dev/null", "Read migration manifest").strip()
             if not raw_json:
                 return None
             data = json.loads(raw_json)
@@ -53,6 +60,7 @@ Future AI migration agents and User Onboarding agents should inspect this file t
 - **Parent Origin Host**: `{manifest.parent_host}`
 - **Migration Completed**: `{manifest.migration_timestamp}`
 - **Primary Tool Directory**: `{manifest.acl_path}/bin`
+- **Lineage Group**: `{manifest.lineage_group}`
 
 ## 👥 Application Groups (Onboarding Contract)
 {groups_list}
@@ -71,16 +79,34 @@ Future AI migration agents and User Onboarding agents should inspect this file t
 
     @classmethod
     def plant_lineage(cls, ssh: SSHConnection, manifest: ServerMigrationManifest) -> None:
-        """Plants both the machine-readable manifest and the agent SKILL.md on the target server."""
-        ssh.run_privileged("mkdir -p /etc/mcp-migration && chmod 750 /etc/mcp-migration", "Create migration lineage path")
+        """
+        Plants both the machine-readable manifest and the agent SKILL.md on the target server.
+        BUG-21: Directory mode 2750 root:mcp-migrate, files mode 0640 root:mcp-migrate.
+        SEC-1: Writes safely using write_text_privileged.
+        """
+        # Ensure lineage group exists
+        ssh.run_privileged(
+            f"groupadd -r {LINEAGE_GROUP} 2>/dev/null || true",
+            f"Create {LINEAGE_GROUP} group"
+        )
+        ssh.run_privileged(
+            f"mkdir -p /etc/mcp-migration && chown root:{LINEAGE_GROUP} /etc/mcp-migration && chmod 2750 /etc/mcp-migration",
+            "Create hardened migration lineage directory"
+        )
         manifest_json = manifest.model_dump_json(indent=2)
         skill_md = cls.generate_skill_markdown(manifest)
 
-        ssh.run_privileged(
-            f"cat << 'EOF' > {MANIFEST_PATH}\n{manifest_json}\nEOF\nchmod 644 {MANIFEST_PATH}",
-            "Plant machine-readable migration manifest"
+        ssh.write_text_privileged(
+            path=MANIFEST_PATH,
+            content=manifest_json,
+            mode="0640",
+            owner="root",
+            group=LINEAGE_GROUP
         )
-        ssh.run_privileged(
-            f"cat << 'EOF' > {SKILL_PATH}\n{skill_md}\nEOF\nchmod 644 {SKILL_PATH}",
-            "Plant agent reasoning skill on server"
+        ssh.write_text_privileged(
+            path=SKILL_PATH,
+            content=skill_md,
+            mode="0640",
+            owner="root",
+            group=LINEAGE_GROUP
         )
