@@ -74,7 +74,7 @@ For Cursor users, configure `.cursor/mcp.json` to pre-authorize the MCP server t
 {
   "mcpServers": {
     "servermigrate": {
-      "command": "/home/tom/github-repos/mcp-servermigrate/.venv/bin/mcp-servermigrate",
+      "command": "/path/to/mcp-servermigrate/.venv/bin/mcp-servermigrate",
       "alwaysAllow": [
         "audit",
         "plan",
