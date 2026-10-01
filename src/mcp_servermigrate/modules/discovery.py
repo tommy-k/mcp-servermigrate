@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from typing import List, Dict, Optional, Set
 from mcp_servermigrate.core.models import (
     ServerState, BinaryItem, DataFileItem, CronEntry,
@@ -14,12 +15,27 @@ from mcp_servermigrate.core.policy import (
     MODULE_STREAM_RE
 )
 from mcp_servermigrate.modules.lineage import LineageManager
+from mcp_servermigrate.modules.collector import RemoteCollector
 
 class DiscoveryEngine:
     def __init__(self, ssh: SSHConnection):
         self.ssh = ssh
 
     def discover_state(self) -> ServerState:
+        # ⚡ Fast Path: 1-Shot Remote Collector (1 SSH round-trip)
+        try:
+            collector_cmd = RemoteCollector.get_collector_command()
+            raw_output = self.ssh.run_cmd(collector_cmd).strip()
+            if raw_output and raw_output.startswith("{") and raw_output.endswith("}"):
+                data = json.loads(raw_output)
+                if not data.get("hostname"):
+                    data["hostname"] = self.ssh.host
+                return ServerState.model_validate(data)
+        except Exception:
+            # Graceful fallback to multi-command discovery if python3 is unavailable
+            pass
+
+        # 🐢 Fallback Path: Sequential multi-command discovery
         hostname = self.ssh.run_cmd("hostname -f 2>/dev/null || hostname").strip() or self.ssh.host
         os_release = self.ssh.run_cmd(
             'source /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || cat /etc/redhat-release 2>/dev/null || uname -s'
@@ -133,7 +149,6 @@ class DiscoveryEngine:
 
                 members = parts[3].split(",") if len(parts) > 3 and parts[3].strip() else []
 
-                # Filter for custom user/role groups (GID >= 1000 or specific naming patterns)
                 is_custom = (
                     (gid is not None and gid >= 1000) or
                     any(p in g_name for p in ("_users", "_ops", "_dev", "_admin", "tool_users"))

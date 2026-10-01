@@ -40,24 +40,42 @@ class MigrationExecutor:
                     f"Enable module stream {ms.name}:{ms.stream}"
                 )
 
-        # 1. Create Custom Application & Role Groups on Target Server
-        if self._should_run("groups"):
-            console.print("[cyan]1. Creating application role groups on Target...[/cyan]")
-            for grp in self.plan.groups_to_create:
-                console.print(f"  👥 Creating group: [bold]{grp.name}[/bold]")
-                self.tgt.run_privileged(
-                    f"groupadd -r '{grp.name}' 2>/dev/null || true",
-                    f"Create application role group '{grp.name}'"
-                )
+        # 1. Create Custom Application & Role Groups on Target Server (⚡ Batched round-trip)
+        if self._should_run("groups") and self.plan.groups_to_create:
+            console.print(f"[cyan]1. Creating {len(self.plan.groups_to_create)} application role groups on Target (batch)...[/cyan]")
+            group_cmds = [f"groupadd -r '{grp.name}' 2>/dev/null || true" for grp in self.plan.groups_to_create]
+            self.tgt.run_privileged(" && ".join(group_cmds), "Create application role groups in batch")
 
         # 2. Prepare Staging & Target Directories
         if self._should_run("staging"):
             console.print("[cyan]2. Preparing /opt/tools directory structure...[/cyan]")
             self.tgt.run_privileged("mkdir -p /opt/tools/bin /tmp/mcp_staging", "Create tool paths")
 
-        # 3. Deploy Applications & Assign Granular Group ACLs
+        # 3. Deploy Applications & Assign Granular Group ACLs (⚡ Parallel Upstream Downloads)
         if self._should_run("binaries"):
             console.print("[cyan]3. Deploying applications and CLI tools...[/cyan]")
+
+            # Phase A: Concurrently download all remote archives in parallel on the target
+            download_candidates = [
+                app for app in self.plan.apps_to_install
+                if app.strategy in (InstallStrategy.TARBALL_DOWNLOAD, InstallStrategy.PRELOADED_RECIPE) and app.download_url
+            ]
+
+            if download_candidates:
+                console.print(f"  ⚡ Launching parallel downloads on target for: {', '.join([a.name for a in download_candidates])}...")
+                dl_jobs = []
+                for app in download_candidates:
+                    tmp_archive = f"/tmp/mcp_staging/{app.name}_archive"
+                    job = f"curl -fsSL -o '{tmp_archive}' -- '{app.download_url}'"
+                    if app.checksum_url:
+                        checksum_file = f"/tmp/mcp_staging/{app.name}.sha256"
+                        job += f" && curl -fsSL -o '{checksum_file}' -- '{app.checksum_url}'"
+                    dl_jobs.append(f"({job}) &")
+
+                batch_download_cmd = " ".join(dl_jobs) + " wait"
+                self.tgt.run_privileged(batch_download_cmd, "Parallel download upstream releases")
+
+            # Phase B: Extract, stage, hardlink, and apply ACLs
             for app in self.plan.apps_to_install:
                 target_bin = app.target_path if app.target_path.startswith("/opt/tools/bin") else f"/opt/tools/bin/{app.name}"
 
@@ -71,24 +89,12 @@ class MigrationExecutor:
                     continue
 
                 if app.strategy in (InstallStrategy.TARBALL_DOWNLOAD, InstallStrategy.PRELOADED_RECIPE) and app.download_url:
-                    console.print(f"  ⬇️  Downloading [green]{app.name}[/green] ({app.version}) for group [yellow]{app.target_group}[/yellow]...")
+                    console.print(f"  📦 Unpacking and configuring [green]{app.name}[/green] ({app.version})...")
                     tmp_archive = f"/tmp/mcp_staging/{app.name}_archive"
 
-                    # BUG-12: Use curl -fsSL -o FILE -- URL syntax
-                    self.tgt.run_privileged(
-                        f"curl -fsSL -o '{tmp_archive}' -- '{app.download_url}'",
-                        f"Download {app.name} upstream release"
-                    )
-
-                    # SEC-5: Checksum verification
+                    # SEC-5: Verify checksum if present
                     if app.checksum_url:
-                        console.print(f"  🛡️  Verifying checksum for [green]{app.name}[/green]...")
                         checksum_file = f"/tmp/mcp_staging/{app.name}.sha256"
-                        self.tgt.run_privileged(
-                            f"curl -fsSL -o '{checksum_file}' -- '{app.checksum_url}'",
-                            f"Download checksum for {app.name}"
-                        )
-                        # Verify using sha256sum
                         verify_cmd = (
                             f"cd /tmp/mcp_staging && "
                             f"grep -E '({app.name}|{os.path.basename(app.download_url)})' '{checksum_file}' | sha256sum -c --status 2>/dev/null || "
@@ -184,13 +190,11 @@ class MigrationExecutor:
         # 7. Migrate Root Crontabs with Backup & Idempotency (BUG-10, BUG-15, BUG-16)
         if self._should_run("crons") and self.plan.root_crons_to_apply:
             console.print("[cyan]7. Applying root crontabs on Target (with backup)...[/cyan]")
-            # BUG-15: Backup existing crontab
             self.tgt.run_privileged(
                 "crontab -l -u root > /etc/crontab.root.mcpbak 2>/dev/null || true",
                 "Backup current root crontab to /etc/crontab.root.mcpbak"
             )
 
-            # Read existing target crontab to avoid duplicates (BUG-16)
             existing_lines = set()
             try:
                 raw_existing = self.tgt.run_privileged("crontab -l -u root 2>/dev/null", "Read target crontab").splitlines()
