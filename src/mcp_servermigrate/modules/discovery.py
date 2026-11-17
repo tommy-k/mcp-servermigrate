@@ -209,6 +209,13 @@ class DiscoveryEngine:
             p.strip() for p in self.ssh.run_cmd("ls -1 /etc/profile.d/*.sh 2>/dev/null").splitlines() if p.strip()
         ]
 
+        # 9. Informational PAM group.conf rules (never applied automatically)
+        pam_rules = [
+            line.strip()
+            for line in self.ssh.run_cmd("grep -vE '^\\s*(#|$)' /etc/security/group.conf 2>/dev/null").splitlines()
+            if line.strip()
+        ]
+
         return ServerState(
             hostname=hostname,
             os_release=os_release,
@@ -222,5 +229,6 @@ class DiscoveryEngine:
             installed_rpms=installed_rpms,
             root_crons=root_crons,
             running_services=services,
-            profile_scripts=profile_scripts
+            profile_scripts=profile_scripts,
+            informational_pam_rules=pam_rules
         )

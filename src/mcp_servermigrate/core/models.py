@@ -129,6 +129,7 @@ class ServerState(BaseModel):
     running_services: List[ServiceItem] = Field(default_factory=list)
     profile_scripts: List[str] = Field(default_factory=list)
     posix_acls: Dict[str, str] = Field(default_factory=dict)
+    informational_pam_rules: List[str] = Field(default_factory=list)
 
 class RBACMapping(BaseModel):
     local_group: str
@@ -143,7 +144,9 @@ class MigrationPlan(BaseModel):
     is_genesis_migration: bool = True
     preloaded_recipes_used: List[str] = Field(default_factory=list)
     groups_to_create: List[GroupItem] = Field(default_factory=list)
+    packages_to_install: List[str] = Field(default_factory=list)
     apps_to_install: List[AppMigrationItem] = Field(default_factory=list)
+    symlinks_to_create: Dict[str, str] = Field(default_factory=dict)
     data_files_to_sync: List[DataFileItem] = Field(default_factory=list)
     flat_binaries_to_sync: List[str] = Field(default_factory=list)
     root_crons_to_apply: List[CronEntry] = Field(default_factory=list)
@@ -151,6 +154,7 @@ class MigrationPlan(BaseModel):
     profile_scripts_to_deploy: List[str] = Field(default_factory=list)
     module_streams: List[ModuleStreamItem] = Field(default_factory=list)
     platform_baseline: Optional[PlatformBaseline] = None
+    informational_pam_rules: List[str] = Field(default_factory=list)
     skipped_items: List[str] = Field(default_factory=list)
     manifest_to_plant: Optional[ServerMigrationManifest] = None
     manifest_skill_markdown: Optional[str] = None

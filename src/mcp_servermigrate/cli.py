@@ -68,7 +68,8 @@ def migrate(
     executor.execute_plan()
 
     verifier = PostFlightVerifier(tgt_conn)
-    results = verifier.verify()
+    published = [a.name for a in plan.apps_to_install]
+    results = verifier.verify(published_tools=published)
     console.print(f"[bold green]Post-Flight Verification:[/bold green] {results}")
 
     src_conn.close()
