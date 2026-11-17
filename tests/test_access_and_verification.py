@@ -96,8 +96,8 @@ def test_executor_no_pam_edits_0750_tool_users_symlinks_and_byte_copy():
     priv_cmds = [str(c) for c in tgt_mock.run_privileged.mock_calls]
     # Verify dnf install in packages stage
     assert any("dnf install -y 'jq'" in c for c in priv_cmds)
-    # Verify 0750 root:tool_users and /usr/local/bin symlink
-    assert any("chmod 0750 '/opt/tools/bin/mytool'" in c and "ln -sf '/opt/tools/bin/mytool' '/usr/local/bin/mytool'" in c for c in priv_cmds)
+    # Verify 0750 root:tool_users and /usr/local/bin ln -sfn symlink
+    assert any("chmod 0750 '/opt/tools/bin/mytool'" in c and "ln -sfn '/opt/tools/bin/mytool' '/usr/local/bin/mytool'" in c for c in priv_cmds)
     # Verify NO PAM / group.conf edits
     assert not any("/etc/security/group.conf" in c or "/etc/pam.d" in c for c in priv_cmds)
 
@@ -169,6 +169,7 @@ def test_cron_dependencies_and_profile_script_protections():
     assert len(plan.data_files_to_sync) == 1
     assert plan.data_files_to_sync[0].target_path == "/home/alice/nightly.sh"
     assert plan.data_files_to_sync[0].owner == "alice"
+    assert plan.data_files_to_sync[0].group == ""
 
 
 def test_verifier_checks_member_by_name_and_non_member_refusal():
@@ -188,10 +189,12 @@ def test_verifier_checks_member_by_name_and_non_member_refusal():
             return ""
         if "stat -c" in cmd:
             return "750:tool_users\n/opt/tools/bin/gh\n"
+        if "ldd " in cmd:
+            return ""
         if "nobody" in cmd:
             return "REFUSED\n"
-        if "alice" in cmd:
-            return "/usr/local/bin/gh\nMEMBER_OK\n"
+        if "alice" in cmd and "base64 -d | bash" in cmd:
+            return "MEMBER_OK:/usr/local/bin/gh\n"
         return ""
 
     tgt_mock.run_cmd.side_effect = mock_run_cmd
@@ -204,5 +207,27 @@ def test_verifier_checks_member_by_name_and_non_member_refusal():
     assert res["verified_member"] == "alice"
     assert res["tool_checks"]["gh"]["symlink_in_usr_local_bin"] is True
     assert res["tool_checks"]["gh"]["mode_no_world_access"] is True
+    assert res["tool_checks"]["gh"]["abi_dependencies_ok"] is True
     assert res["tool_checks"]["gh"]["non_member_refused"] is True
     assert res["tool_checks"]["gh"]["member_executable_by_name"] is True
+
+
+def test_verifier_catches_missing_shared_library():
+    tgt_mock = MagicMock()
+    tgt_mock.run_cmd.side_effect = lambda cmd: (
+        "Netid State\n" if "ss -tulpn" in cmd else
+        "group:tool_users:r-x\n" if "getfacl" in cmd else
+        "tool_users:x:1001:alice\n" if "getent group" in cmd else ""
+    )
+    tgt_mock.run_privileged.side_effect = lambda cmd, just="": (
+        "" if "ausearch" in cmd else
+        "750:tool_users\n/opt/tools/bin/oldbin\n" if "stat -c" in cmd else
+        "\tlibssl.so.1.1 => not found\n" if "ldd " in cmd else
+        "REFUSED\n" if "nobody" in cmd else
+        "MEMBER_OK:/usr/local/bin/oldbin\n" if "alice" in cmd else ""
+    )
+
+    res = PostFlightVerifier(tgt_mock).verify(published_tools=["oldbin"])
+    assert res["passed"] is False
+    assert res["tool_checks"]["oldbin"]["abi_dependencies_ok"] is False
+    assert "libssl.so.1.1" in res["tool_checks"]["oldbin"]["missing_libs"]

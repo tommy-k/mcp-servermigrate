@@ -81,7 +81,7 @@ class MigrationPlanner:
                 target_path=remapped_target,
                 mode="0750" if clean_src.endswith(".sh") else "0644",
                 owner=owner,
-                group="root" if owner == "root" else owner,
+                group="root" if owner == "root" else "",
             ))
         return deps
 

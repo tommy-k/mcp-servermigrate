@@ -121,7 +121,7 @@ class MigrationExecutor:
                     )
                     # Publish symlink in /usr/local/bin
                     self.tgt.run_privileged(
-                        f"ln -sf '{target_bin}' '/usr/local/bin/{app.name}'",
+                        f"ln -sfn '{target_bin}' '/usr/local/bin/{app.name}'",
                         f"Publish symlink /usr/local/bin/{app.name}"
                     )
                     continue
@@ -176,14 +176,14 @@ class MigrationExecutor:
                     f"chmod 0750 '{target_bin}' && "
                     f"(chcon -t bin_t '{target_bin}' 2>/dev/null || true) && "
                     f"{acl_cmd}"
-                    f"ln -sf '{target_bin}' '/usr/local/bin/{app.name}'",
+                    f"ln -sfn '{target_bin}' '/usr/local/bin/{app.name}'",
                     f"Publish {app.name} (0750 root:tool_users) and symlink to /usr/local/bin"
                 )
 
             # Ensure any remaining planned symlinks exist
             for link_path, target_path in self.plan.symlinks_to_create.items():
                 self.tgt.run_privileged(
-                    f"ln -sf '{target_path}' '{link_path}'",
+                    f"ln -sfn '{target_path}' '{link_path}'",
                     f"Ensure symlink {link_path} -> {target_path}"
                 )
 
@@ -204,7 +204,7 @@ class MigrationExecutor:
                         data=raw_bytes,
                         mode=df.mode or "0644",
                         owner=df.owner or "root",
-                        group=df.group or "root"
+                        group=df.group
                     )
                 except Exception as e:
                     console.print(f"    [yellow]⚠️ Skipping {df.source_path}: {e}[/yellow]")

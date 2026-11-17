@@ -1,3 +1,4 @@
+import base64
 from typing import Dict, Any, List, Optional
 from mcp_servermigrate.core.ssh_client import SSHConnection
 from mcp_servermigrate.modules.lineage import LineageManager
@@ -29,6 +30,14 @@ class PostFlightVerifier:
                 return members[0]
         return None
 
+    def _run_in_member_login_shell(self, member: str, script: str, justification: str) -> str:
+        """Runs a script inside the target member's login shell without outer-shell variable expansion."""
+        b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        return self.tgt.run_privileged(
+            f"su -s /bin/bash -l '{member}' -c 'echo {b64} | base64 -d | bash'",
+            justification,
+        )
+
     def verify(
         self,
         published_tools: Optional[List[str]] = None,
@@ -55,7 +64,7 @@ class PostFlightVerifier:
         acl_check = self.tgt.run_cmd("getfacl /opt/tools")
         results["tools_acl_configured"] = "tool_users" in acl_check
 
-        # 4. Verify each published tool: symlink in /usr/local/bin, 0750 mode, member access, non-member refusal
+        # 4. Verify each published tool: symlink in /usr/local/bin, 0750 mode, ABI/ldd check, member access, non-member refusal
         tools = self._get_published_tools(published_tools)
         real_member = self._find_tool_users_member(member_user)
 
@@ -83,9 +92,16 @@ class PostFlightVerifier:
                     mode_ok = False
                 symlink_ok = (resolved_link == bin_path)
 
+            # Check shared-library dependencies for ELF binaries (catches RHEL 8 -> 9 missing .so)
+            ldd_out = self.tgt.run_privileged(
+                f"sh -c 'if ldd \"{bin_path}\" >/dev/null 2>&1; then ldd \"{bin_path}\" | grep \"not found\" || true; fi'",
+                f"Check shared library dependencies for {tool}"
+            ).strip()
+            abi_ok = (ldd_out == "")
+
             # Check non-member is refused execution
             refused_out = self.tgt.run_privileged(
-                f"su -s /bin/bash '{non_member_user}' -c \"test -x '{bin_path}' && echo ALLOWED || echo REFUSED\"",
+                f"su -s /bin/bash '{non_member_user}' -c 'test -x \"{bin_path}\" && echo ALLOWED || echo REFUSED'",
                 f"Verify non-member {non_member_user} is refused {tool}"
             ).strip()
             non_member_refused = ("REFUSED" in refused_out and "ALLOWED" not in refused_out)
@@ -93,19 +109,27 @@ class PostFlightVerifier:
             # Check real member can find tool by name on login $PATH and execute it
             member_exec_ok: Optional[bool] = None
             if real_member:
-                member_out = self.tgt.run_privileged(
-                    f"su -s /bin/bash -l '{real_member}' -c \"command -v '{tool}' && test -x \\\"\\$(command -v '{tool}')\\\" && echo MEMBER_OK\"",
-                    f"Verify member {real_member} can resolve and execute {tool} by name"
+                inner_script = (
+                    f"resolved=$(command -v '{tool}') && "
+                    f"test -x \"$resolved\" && "
+                    f"echo \"MEMBER_OK:$resolved\""
+                )
+                member_out = self._run_in_member_login_shell(
+                    real_member,
+                    inner_script,
+                    f"Verify member {real_member} can resolve and execute {tool} by name",
                 ).strip()
-                member_exec_ok = ("MEMBER_OK" in member_out)
+                member_exec_ok = ("MEMBER_OK:" in member_out)
 
-            tool_ok = mode_ok and symlink_ok and non_member_refused and (member_exec_ok is not False)
+            tool_ok = mode_ok and symlink_ok and abi_ok and non_member_refused and (member_exec_ok is not False)
             if not tool_ok:
                 all_tools_ok = False
 
             tool_checks[tool] = {
                 "mode_no_world_access": mode_ok,
                 "symlink_in_usr_local_bin": symlink_ok,
+                "abi_dependencies_ok": abi_ok,
+                "missing_libs": ldd_out or None,
                 "non_member_refused": non_member_refused,
                 "member_executable_by_name": member_exec_ok,
                 "ok": tool_ok,
