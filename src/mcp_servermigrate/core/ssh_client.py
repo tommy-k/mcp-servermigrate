@@ -123,10 +123,11 @@ class SSHConnection:
         data: bytes,
         mode: str = "0750",
         owner: str = "root",
-        group: str = "root"
+        group: Optional[str] = "root"
     ) -> None:
         """
         SEC-1: Stage raw binary bytes unprivileged in /tmp/mcp-upload-<uuid> and place with sudo install.
+        When group is empty/None, uses trailing-colon chown (`chown owner:`) for AD/SSSD primary group resolution.
         """
         staging_file = f"/tmp/mcp-upload-{uuid.uuid4().hex}"
         try:
@@ -142,8 +143,13 @@ class SSHConnection:
         if parent_dir:
             self.run_privileged(f"mkdir -p '{parent_dir}'", f"Create directory {parent_dir}")
 
+        if group:
+            place_cmd = f"install -m {mode} -o '{owner}' -g '{group}' '{staging_file}' '{path}'"
+        else:
+            place_cmd = f"install -m {mode} -o '{owner}' '{staging_file}' '{path}' && chown '{owner}': '{path}'"
+
         self.run_privileged(
-            f"install -m {mode} -o {owner} -g {group} '{staging_file}' '{path}' && rm -f '{staging_file}'",
+            f"{place_cmd} && rm -f '{staging_file}'",
             f"Place privileged binary {path}"
         )
 
