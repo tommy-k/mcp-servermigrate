@@ -104,6 +104,49 @@ class SSHConnection:
                 return self.run_privileged(f"cat '{path}'", f"Read privileged file {path}")
             raise
 
+    def read_bytes(self, path: str, use_sudo_fallback: bool = True) -> bytes:
+        """Reads raw bytes from remote path for byte-for-byte binary copying."""
+        try:
+            sftp = self.get_sftp()
+            with sftp.open(path, "rb") as f:
+                return f.read()
+        except Exception:
+            if use_sudo_fallback:
+                import base64
+                b64_out = self.run_privileged(f"base64 -w0 '{path}'", f"Read privileged binary {path}").strip()
+                return base64.b64decode(b64_out)
+            raise
+
+    def write_bytes_privileged(
+        self,
+        path: str,
+        data: bytes,
+        mode: str = "0750",
+        owner: str = "root",
+        group: str = "root"
+    ) -> None:
+        """
+        SEC-1: Stage raw binary bytes unprivileged in /tmp/mcp-upload-<uuid> and place with sudo install.
+        """
+        staging_file = f"/tmp/mcp-upload-{uuid.uuid4().hex}"
+        try:
+            sftp = self.get_sftp()
+            with sftp.open(staging_file, "wb") as f:
+                f.write(data)
+        except Exception:
+            import base64
+            b64_content = base64.b64encode(data).decode("ascii")
+            self.run_cmd(f"echo '{b64_content}' | base64 -d > '{staging_file}'")
+
+        parent_dir = path.rsplit("/", 1)[0]
+        if parent_dir:
+            self.run_privileged(f"mkdir -p '{parent_dir}'", f"Create directory {parent_dir}")
+
+        self.run_privileged(
+            f"install -m {mode} -o {owner} -g {group} '{staging_file}' '{path}' && rm -f '{staging_file}'",
+            f"Place privileged binary {path}"
+        )
+
     def write_text_privileged(
         self,
         path: str,

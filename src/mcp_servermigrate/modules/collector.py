@@ -194,8 +194,28 @@ def main():
             module_streams.append({"name": m.group(1), "stream": m.group(2), "profile": m.group(3) or "common"})
     data["module_streams"] = module_streams
 
-    # 10. Profile Scripts
-    data["profile_scripts"] = glob.glob("/etc/profile.d/*.sh")
+    # 10. Profile Scripts (skip world-writable ones)
+    safe_profiles = []
+    for pf in glob.glob("/etc/profile.d/*.sh"):
+        try:
+            if (os.stat(pf).st_mode & 0o002) == 0:
+                safe_profiles.append(pf)
+        except Exception:
+            pass
+    data["profile_scripts"] = safe_profiles
+
+    # 11. Informational PAM group.conf rules (never applied automatically)
+    pam_rules = []
+    if os.path.exists("/etc/security/group.conf"):
+        try:
+            with open("/etc/security/group.conf") as f:
+                for line in f:
+                    s = line.strip()
+                    if s and not s.startswith("#"):
+                        pam_rules.append(s)
+        except Exception:
+            pass
+    data["informational_pam_rules"] = pam_rules
 
     # Output clean JSON
     print(json.dumps(data))

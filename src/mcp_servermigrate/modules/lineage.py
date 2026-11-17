@@ -45,9 +45,9 @@ class LineageManager:
 
         rules_list = "\n".join([f"{i+1}. {rule}" for i, rule in enumerate(manifest.learned_rules)]) or (
             "1. **SELinux Context**: Always maintain `bin_t` on `/opt/tools/bin/` so domain users can execute binaries.\n"
-            "2. **POSIX ACLs**: Ensure default inheritance (`-d`) is active for group `tool_users` on `/opt/tools`.\n"
-            "3. **PAM Bridging**: AD `%Domain Users` is dynamically attached to `tool_users` via `/etc/security/group.conf`.\n"
-            "4. **User Onboarding Contract**: Future onboarding agents can assign users to groups listed in 'Application Groups' above to grant specific tool rights."
+            "2. **POSIX ACLs**: Ensure `tool_users` (`2750` on `/opt/tools/bin`, `0750` on binaries, no world/everyone access) is maintained.\n"
+            "3. **PATH Publishing**: Every published CLI binary in `/opt/tools/bin/<tool>` is symlinked into `/usr/local/bin/<tool>` for default `$PATH` discovery without PAM or profile overrides.\n"
+            "4. **User Onboarding Contract**: Future onboarding agents assign users to `tool_users` (and any app-specific groups listed in 'Application Groups' above)."
         )
 
         return f"""# 🧠 Server Migration Lineage & Operational Skill

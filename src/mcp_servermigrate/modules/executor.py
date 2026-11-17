@@ -7,7 +7,19 @@ from rich.console import Console
 
 console = Console()
 
-ALL_STAGES = {"groups", "staging", "binaries", "data_files", "rbac", "profile_scripts", "crons", "lineage", "modules"}
+ALL_STAGES = {
+    "modules",
+    "groups",
+    "packages",
+    "staging",
+    "binaries",
+    "data_files",
+    "rbac",
+    "profile_scripts",
+    "crons",
+    "lineage",
+}
+
 
 class MigrationExecutor:
     def __init__(
@@ -30,6 +42,12 @@ class MigrationExecutor:
         if self.plan.preloaded_recipes_used:
             console.print(f"[cyan]🧠 Preloaded recipes inherited from lineage:[/cyan] {', '.join(self.plan.preloaded_recipes_used)}")
 
+        if self.plan.informational_pam_rules:
+            console.print(
+                f"[yellow]ℹ️  Informational only — {len(self.plan.informational_pam_rules)} PAM group.conf rule(s) "
+                f"detected on source (not applied to target per access policy).[/yellow]"
+            )
+
         # 0. Enable DNF Module Streams (BUG-13)
         if self._should_run("modules") and self.plan.module_streams:
             console.print("[cyan]0. Enabling DNF Module Streams on Target...[/cyan]")
@@ -46,12 +64,27 @@ class MigrationExecutor:
             group_cmds = [f"groupadd -r '{grp.name}' 2>/dev/null || true" for grp in self.plan.groups_to_create]
             self.tgt.run_privileged(" && ".join(group_cmds), "Create application role groups in batch")
 
-        # 2. Prepare Staging & Target Directories
-        if self._should_run("staging"):
-            console.print("[cyan]2. Preparing /opt/tools directory structure...[/cyan]")
-            self.tgt.run_privileged("mkdir -p /opt/tools/bin /tmp/mcp_staging", "Create tool paths")
+        # 1b. Real `packages` Stage (dnf install FIRST before tarballs/binaries)
+        if self._should_run("packages") and self.plan.packages_to_install:
+            pkg_list = " ".join(f"'{p}'" for p in self.plan.packages_to_install)
+            console.print(f"[cyan]1b. Installing {len(self.plan.packages_to_install)} candidate RPM packages via dnf...[/cyan]")
+            self.tgt.run_privileged(
+                f"dnf install -y {pkg_list}",
+                "Install candidate RPM packages"
+            )
 
-        # 3. Deploy Applications & Assign Granular Group ACLs (⚡ Parallel Upstream Downloads)
+        # 2. Prepare Staging & Target Directories (owned by root:tool_users, mode 2750, no world access)
+        if self._should_run("staging"):
+            console.print("[cyan]2. Preparing /opt/tools directory structure (2750 root:tool_users)...[/cyan]")
+            self.tgt.run_privileged(
+                "groupadd -r tool_users 2>/dev/null || true && "
+                "mkdir -p /opt/tools/bin /usr/local/bin /tmp/mcp_staging && "
+                "chown root:tool_users /opt/tools /opt/tools/bin && "
+                "chmod 2750 /opt/tools /opt/tools/bin",
+                "Create hardened tool paths"
+            )
+
+        # 3. Deploy Applications, Enforce 0750 root:tool_users, and Publish /usr/local/bin Symlinks
         if self._should_run("binaries"):
             console.print("[cyan]3. Deploying applications and CLI tools...[/cyan]")
 
@@ -75,7 +108,7 @@ class MigrationExecutor:
                 batch_download_cmd = " ".join(dl_jobs) + " wait"
                 self.tgt.run_privileged(batch_download_cmd, "Parallel download upstream releases")
 
-            # Phase B: Extract, stage, hardlink, and apply ACLs
+            # Phase B: Extract, stage byte-for-byte, hardlink, enforce 0750 root:tool_users, and symlink
             for app in self.plan.apps_to_install:
                 target_bin = app.target_path if app.target_path.startswith("/opt/tools/bin") else f"/opt/tools/bin/{app.name}"
 
@@ -86,21 +119,26 @@ class MigrationExecutor:
                         f"ln -f '{app.hardlink_of}' '{target_bin}'",
                         f"Hardlink {app.name} from {app.hardlink_of}"
                     )
+                    # Publish symlink in /usr/local/bin
+                    self.tgt.run_privileged(
+                        f"ln -sf '{target_bin}' '/usr/local/bin/{app.name}'",
+                        f"Publish symlink /usr/local/bin/{app.name}"
+                    )
                     continue
 
                 if app.strategy in (InstallStrategy.TARBALL_DOWNLOAD, InstallStrategy.PRELOADED_RECIPE) and app.download_url:
                     console.print(f"  📦 Unpacking and configuring [green]{app.name}[/green] ({app.version})...")
                     tmp_archive = f"/tmp/mcp_staging/{app.name}_archive"
 
-                    # SEC-5: Verify checksum if present
+                    # SEC-5: Strict checksum verification — FAIL the stage on mismatch (no `|| true`)
                     if app.checksum_url:
                         checksum_file = f"/tmp/mcp_staging/{app.name}.sha256"
+                        asset_pattern = app.checksum_asset or os.path.basename(app.download_url) or app.name
                         verify_cmd = (
                             f"cd /tmp/mcp_staging && "
-                            f"grep -E '({app.name}|{os.path.basename(app.download_url)})' '{checksum_file}' | sha256sum -c --status 2>/dev/null || "
-                            f"sha256sum -c '{checksum_file}' --status 2>/dev/null || true"
+                            f"grep -F '{asset_pattern}' '{checksum_file}' | awk '{{print $1 \"  {app.name}_archive\"}}' | sha256sum -c --status"
                         )
-                        self.tgt.run_privileged(verify_cmd, f"Verify checksum for {app.name}")
+                        self.tgt.run_privileged(verify_cmd, f"Verify SHA256 checksum for {app.name}")
 
                     if app.archive_format == "zip":
                         self.tgt.run_privileged(
@@ -114,40 +152,56 @@ class MigrationExecutor:
                     else:
                         self.tgt.run_privileged(
                             f"mkdir -p '/tmp/mcp_staging/{app.name}_extracted' && "
-                            f"tar -xzf '{tmp_archive}' -C '/tmp/mcp_staging/{app.name}_extracted' 2>/dev/null || true && "
-                            f"find '/tmp/mcp_staging/{app.name}_extracted' -type f -name '{app.name}' -exec cp -f {{}} '{target_bin}' + 2>/dev/null || cp -f '{tmp_archive}' '{target_bin}' && "
+                            f"tar -xzf '{tmp_archive}' -C '/tmp/mcp_staging/{app.name}_extracted' && "
+                            f"find '/tmp/mcp_staging/{app.name}_extracted' -type f -name '{app.name}' -exec cp -f {{}} '{target_bin}' + && "
                             f"rm -rf '/tmp/mcp_staging/{app.name}_extracted' '{tmp_archive}'",
                             f"Unpack tar.gz for {app.name}"
                         )
                 else:
-                    console.print(f"  🔄 Syncing [yellow]{app.name}[/yellow] from Source Server...")
-                    content = self.src.read_text(app.source_path)
-                    self.tgt.write_text_privileged(
+                    # Byte-for-byte binary copy from source
+                    console.print(f"  🔄 Copying [yellow]{app.name}[/yellow] byte-for-byte from Source Server...")
+                    raw_bytes = self.src.read_bytes(app.source_path)
+                    self.tgt.write_bytes_privileged(
                         path=target_bin,
-                        content=content,
-                        mode="0755",
+                        data=raw_bytes,
+                        mode="0750",
                         owner="root",
-                        group=app.target_group
+                        group="tool_users"
                     )
 
-                # Enforce executable permissions, SELinux context, and granular group ACL
+                # Enforce 0750 root:tool_users (no world/everyone access), SELinux bin_t, and optional extra role ACL
+                acl_cmd = f"setfacl -m 'g:{app.target_group}:rx' '{target_bin}' && " if app.target_group and app.target_group != "tool_users" else ""
                 self.tgt.run_privileged(
-                    f"chmod 755 '{target_bin}' && "
-                    f"chcon -t bin_t '{target_bin}' 2>/dev/null || true && "
-                    f"setfacl -m 'g:{app.target_group}:rx' '{target_bin}' 2>/dev/null || true",
-                    f"Set permissions and group ACL for {app.name}"
+                    f"chown root:tool_users '{target_bin}' && "
+                    f"chmod 0750 '{target_bin}' && "
+                    f"(chcon -t bin_t '{target_bin}' 2>/dev/null || true) && "
+                    f"{acl_cmd}"
+                    f"ln -sf '{target_bin}' '/usr/local/bin/{app.name}'",
+                    f"Publish {app.name} (0750 root:tool_users) and symlink to /usr/local/bin"
                 )
 
-        # 4. Deploy Script Data Files (BUG-6)
+            # Ensure any remaining planned symlinks exist
+            for link_path, target_path in self.plan.symlinks_to_create.items():
+                self.tgt.run_privileged(
+                    f"ln -sf '{target_path}' '{link_path}'",
+                    f"Ensure symlink {link_path} -> {target_path}"
+                )
+
+        # 4. Deploy Script Data & Cron Dependency Files (with .mcpbak backup on overwrite)
         if self._should_run("data_files") and self.plan.data_files_to_sync:
-            console.print("[cyan]4. Deploying script data files to Target...[/cyan]")
+            console.print("[cyan]4. Deploying script data and cron dependency files to Target...[/cyan]")
             for df in self.plan.data_files_to_sync:
-                console.print(f"  📄 Syncing data file: [bold]{df.source_path}[/bold]")
+                console.print(f"  📄 Syncing file: [bold]{df.source_path}[/bold] -> [bold]{df.target_path}[/bold]")
                 try:
-                    content = self.src.read_text(df.source_path)
-                    self.tgt.write_text_privileged(
+                    # Back up target file if it already exists before overwriting
+                    self.tgt.run_privileged(
+                        f"test -f '{df.target_path}' && cp -a '{df.target_path}' '{df.target_path}.mcpbak' || true",
+                        f"Backup {df.target_path} before overwrite"
+                    )
+                    raw_bytes = self.src.read_bytes(df.source_path)
+                    self.tgt.write_bytes_privileged(
                         path=df.target_path,
-                        content=content,
+                        data=raw_bytes,
                         mode=df.mode or "0644",
                         owner=df.owner or "root",
                         group=df.group or "root"
@@ -155,22 +209,17 @@ class MigrationExecutor:
                 except Exception as e:
                     console.print(f"    [yellow]⚠️ Skipping {df.source_path}: {e}[/yellow]")
 
-        # 5. Apply Decoupled RBAC Baseline
+        # 5. Apply Decoupled POSIX ACL Baseline (NO PAM / /etc/security/group.conf edits)
         if self._should_run("rbac"):
             for rbac in self.plan.rbac_mappings:
-                console.print(f"[cyan]5. Configuring RBAC baseline for group '{rbac.local_group}'...[/cyan]")
+                console.print(f"[cyan]5. Configuring POSIX ACL baseline for group '{rbac.local_group}' (no PAM edits)...[/cyan]")
                 self.tgt.run_privileged(f"groupadd -r '{rbac.local_group}' 2>/dev/null || true", "Create local role group")
                 self.tgt.run_privileged(f"setfacl -R -m 'g:{rbac.local_group}:{rbac.permissions}' '{rbac.target_path}'", "Apply POSIX ACL")
                 self.tgt.run_privileged(f"setfacl -R -d -m 'g:{rbac.local_group}:{rbac.permissions}' '{rbac.target_path}'", "Apply Default ACL inheritance")
-                self.tgt.run_privileged(
-                    f"grep -q '{rbac.local_group}' /etc/security/group.conf 2>/dev/null || "
-                    f"echo 'sshd; *; %{rbac.ad_group}; Al0000-2400; {rbac.local_group}' >> /etc/security/group.conf",
-                    "Configure PAM group mapping"
-                )
 
-        # 6. Deploy Verified Profile Scripts (BUG-1: Parity over invention)
+        # 6. Deploy Verified Profile Scripts (BUG-1: Parity over invention, no stock overwrites)
         if self._should_run("profile_scripts") and self.plan.profile_scripts_to_deploy:
-            console.print("[cyan]6. Syncing verified profile scripts to /etc/profile.d/...[/cyan]")
+            console.print("[cyan]6. Syncing verified non-stock profile scripts to /etc/profile.d/...[/cyan]")
             for script_path in self.plan.profile_scripts_to_deploy:
                 script_name = os.path.basename(script_path)
                 target_script = f"/etc/profile.d/{script_name}"
